@@ -1,44 +1,23 @@
-## This is the master file for tying together all the helper functions
+# This is the master file for tying together all the helper functions
+library(modules) ## mandatory install
 
-lib <- module::use("R")
-
-## Run this anytime you imports a new library
-lib$libs$getPackages("packges.txt")
-
-## To start a new section, add this signature
-
-####################################################
-####
-##   Section Name and Brief Description
-####
-####################################################
-
-## Example is as below
-
-####################################################
-####
-##   Munging ... data cleanning
-####
-####################################################
-
-dat <- read.csv("path to data")
-
-dat <- lib$munging$clean(dat)
-dat <- lib$munging$recode(dat)
+# expose the modules here
+packages.Self <- modules::use("libs.R")
+graphics.Self <- modules::use("graphics.R")
+munging.Self <- modules::use("munging.R")
+network.Self <- modules::use("network.R")
 
 
+# load libraries
+pkg$getPackages()
 
-####################################################
-####
-##   Generate results
-####
-####################################################
+# get data from network
+dat <- network$getDataFile("https://sixtusdakurah.com/projects/box-office/acting_credits.csv")
 
 
-# gene
+View(dat)
 
-lib$graphics$barplot(dat)
-lib$graphics$lineplot(dat)
+
 
 
 

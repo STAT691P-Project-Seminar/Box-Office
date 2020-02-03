@@ -2,9 +2,9 @@ export("getDataFile")
 
 
 getDataFile <- function(url){
-  
+  import("RCurl")
   download <- getURL(url)
   
-  data <- read.csv (text = download) 
+  data <- utils::read.csv (text = download) 
     
 }
