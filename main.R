@@ -11,8 +11,8 @@ network.Self <- modules::use("network.R")
 # load libraries
 pkg$getPackages()
 
-# get data from network
-dat <- network$getDataFile("https://sixtusdakurah.com/projects/box-office/acting_credits.csv")
+# get data from network ... add desired url
+dat <- network$getDataFile(url)
 
 
 View(dat)
