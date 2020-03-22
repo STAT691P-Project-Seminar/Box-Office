@@ -1,0 +1,736 @@
+---
+title: "Regression Analysis"
+author: "Sixtus Dakurah"
+date: "2/11/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# remove env var to start with
+rm(list=ls())
+# mandatory install
+library(modules)
+# set wkdir
+setwd("/Users/sixtusdakurah/Documents/GRAD SCHOOL/SPRING 2020/Project Seminar/Box-Office")
+library(stargazer)
+```
+
+```{r}
+library(Metrics)
+```
+
+
+
+## load modules
+
+```{r}
+# expose the modules here
+packages.Self <- modules::use("libs.R")
+graphics.Self <- modules::use("graphics.R")
+munging.Self <- modules::use("mungin.R")
+network.Self <- modules::use("network.R")
+```
+
+
+## get data from network
+
+```{r message=FALSE, warning=FALSE}
+movie_summary_net <- network.Self$getDataFile("https://sixtusdakurah.com/projects/box-office/movie_summary.csv")
+movie_ratings <- network.Self$getDataFile("https://sixtusdakurah.com/projects/box-office/movie_ratings.csv")
+#weekend_boxoffice <- network$getDataFile("https://sixtusdakurah.com/projects/box-office/weekend_boxoffice.csv")
+```
+
+
+# take a head look
+
+```{r}
+head(movie_summary_net)
+```
+
+
+```{r}
+dim(movie_summary_net)
+dim(movie_ratings)
+```
+
+
+# merge the ratings to the movie summary
+
+```{r}
+movie_summary <- merge(movie_summary_net, movie_ratings,  by = "movie_odid")
+head(movie_summary)
+```
+
+# take a look at the production weekend revenue
+
+```{r}
+summary(movie_summary$opening_weekend_revenue)
+```
+
+```{r}
+dim(movie_summary[movie_summary$opening_weekend_revenue==0, ])
+```
+
+# about 3000 movies did not have opening weekend revenue
+
+```{r}
+# less the median
+dim(movie_summary[movie_summary$opening_weekend_revenue < median(movie_summary$opening_weekend_revenue), ])
+```
+
+# working with movies about the median
+
+```{r}
+movie_summary_above_median <- movie_summary[movie_summary$opening_weekend_revenue >= median(movie_summary$opening_weekend_revenue), ]
+```
+
+```{r}
+summary(movie_summary_above_median$opening_weekend_revenue)
+```
+
+# take a look at the distribution
+
+```{r}
+par(mfrow=c(1,2))
+hist(movie_summary_above_median$opening_weekend_revenue, main = "Original", xlab = "OPW Revenue")
+hist(log(movie_summary_above_median$opening_weekend_revenue), main = "Log transformed", xlab = "Log OPW Revenue")
+```
+
+# original heavily skewed to the right and the log transform is bimodal! Model the log of the opening weekend might be good!
+
+# taking a look at the production budget
+
+```{r}
+summary(movie_summary_above_median$production_budget)
+```
+
+# some prod budgets are zero!
+
+```{r}
+dim(movie_summary[movie_summary_above_median$production_budget==0, ])
+```
+
+```{r}
+summary( (movie_summary_above_median[movie_summary_above_median$production_budget>0, ])$production_budget )
+```
+
+```{r}
+hist(log((movie_summary_above_median[movie_summary_above_median$production_budget>1000000, ])$production_budget ), main = "Production Budget", xlab = "Budget")
+```
+
+# only look at movies with production budget of atleast a million dollar
+
+```{r}
+movie_summary_prod_ <- movie_summary_above_median[movie_summary_above_median$production_budget>1000000, ]
+dim(movie_summary_prod_)
+```
+
+```{r}
+par(mfrow=c(1,2))
+hist(movie_summary_prod_$opening_weekend_revenue, main = "Original", xlab = "OPW Revenue")
+hist(log(movie_summary_prod_$opening_weekend_revenue), main = "Log transformed", xlab = "Log OPW Revenue")
+```
+
+
+# look at the scatter plot of weekend revenue and production budget
+
+```{r}
+plot( x =log(movie_summary_prod_$production_budget), y= movie_summary_prod_$opening_weekend_revenue, xlab = "Budget", ylab = "Log revenue")
+```
+
+# add the log revenue var
+
+```{r}
+movie_summary_prod_$log_revenue <- log(movie_summary_prod_$opening_weekend_revenue)
+```
+
+
+# test regression model
+
+
+```{r}
+test.lm.model <- lm(log_revenue~production_budget, data = movie_summary_prod_)
+summary(test.lm.model)
+```
+
+```{r}
+sum(exp(test.lm.model$residuals))
+```
+
+
+
+# look at run time
+
+```{r}
+movie_summary_prod_$running_time <- as.numeric(movie_summary_prod_$running_time)
+summary(movie_summary_prod_$running_time)
+```
+
+```{r}
+hist(movie_summary_prod_[movie_summary_prod_$running_time > 100, ]$running_time)
+```
+
+```{r}
+dim(movie_summary_prod_[movie_summary_prod_$running_time <= 100, ])
+```
+
+# modeling the runtime directly might not be useful put into categories
+
+```{r}
+movie_summary_prod_$running_length <- sapply(movie_summary_prod_$running_time, function(t){(if (t < 100 ) '1' else '0')})
+```
+
+```{r}
+table((movie_summary_prod_$running_length))
+```
+
+```{r}
+test.lm.model <- lm(log_revenue~production_budget + running_time:running_length, data = movie_summary_prod_)
+summary(test.lm.model)
+```
+
+```{r}
+sum(exp(test.lm.model$residuals))
+```
+
+
+## look at sequel
+
+```{r}
+movie_summary_prod_ <- (movie_summary_prod_[movie_summary_prod_$sequel!='NULL', ])
+dim(movie_summary_prod_)
+```
+
+
+```{r}
+test.lm.model <- lm(log_revenue~production_budget + running_time:running_length + sequel, data = movie_summary_prod_)
+summary(test.lm.model)
+sum(exp(test.lm.model$residuals))
+```
+
+
+## take a  look at the release date
+
+```{r}
+# get the release year and month
+movie_summary_prod_$release_date<- as.Date(movie_summary_prod_$release_date)
+movie_summary_prod_$release_year <- (format(movie_summary_prod_$release_date, '%Y'))
+movie_summary_prod_$release_month <- ((format(movie_summary_prod_$release_date, '%m')))
+```
+
+```{r}
+table(movie_summary_prod_$release_month)
+```
+
+```{r}
+library(ggplot2)
+ggplot(movie_summary_prod_, aes(as.factor(release_month), opening_weekend_revenue)) + 
+    geom_boxplot() + 
+    labs(y = "Percentage correct", x = "Categorical variable");
+```
+
+### its like may june august and november
+
+```{r}
+movie_summary_prod_$season <- sapply(movie_summary_prod_$release_month, function(t){(if (t == 05 ) '1' else if (t==06) {'1'} else if (t==07){'1'} else if(t==11){'1'} else  '0')})
+```
+
+```{r}
+table(movie_summary_prod_$season)
+```
+
+```{r}
+test.lm.model <- lm(log_revenue~production_budget + running_time:running_length + sequel + release_month, data = movie_summary_prod_)
+summary(test.lm.model)
+sum(exp(test.lm.model$residuals))
+```
+
+
+## look at opening weekend theaters
+
+```{r}
+summary(movie_summary_prod_$opening_weekend_theaters)
+```
+
+```{r}
+movie_summary_th_ <- (movie_summary_prod_[movie_summary_prod_$opening_weekend_theaters > 0  , ])
+```
+
+```{r}
+summary(movie_summary_th_$opening_weekend_theaters)
+```
+
+```{r}
+hist(movie_summary_th_$opening_weekend_theaters)
+```
+
+```{r}
+test.lm.model <- lm(log_revenue~production_budget + sequel + running_time + season + opening_weekend_theaters, data = movie_summary_th_)
+summary(test.lm.model)
+print(paste( "RMSE; ",  sqrt(mean(( ( exp(test.lm.model$fitted.values) * mean(exp(test.lm.model$residuals)) ) - movie_summary_th_$opening_weekend_revenue)**2))))
+```
+
+## this is loooking pretty good!
+
+# take a look at genre -- remove null
+
+
+
+```{r}
+table(movie_summary_th_$genre)
+```
+
+```{r}
+movie_summary_gen <- movie_summary_th_[movie_summary_th_$genre!='NULL', ]
+dim(movie_summary_gen)
+movie_summary_gen$genre <- as.character(movie_summary_gen$genre)
+movie_summary_gen <- (movie_summary_gen[!is.na(movie_summary_gen$genre), ])
+table(movie_summary_gen$genre)
+```
+
+```{r}
+unique(movie_summary_gen$genre)
+```
+
+
+
+
+```{r}
+ggplot(movie_summary_gen, aes(as.factor(genre), opening_weekend_revenue)) + 
+    geom_boxplot() + 
+    labs(y = "Percentage correct", x = "Categorical variable");
+```
+
+```{r}
+hist(movie_summary_gen[movie_summary_gen$opening_weekend_revenue < 19019731 & movie_summary_gen$opening_weekend_revenue >2000000, ]$opening_weekend_revenue)
+```
+
+
+
+```{r}
+movie_summary_gen$gen_cat <- sapply(as.character(movie_summary_gen$genre), function(t){(if (t == "Adventure" ) '1' else if(t=="Action") {'1'} else '0' )})
+```
+
+```{r}
+table(movie_summary_gen$gen_cat)
+```
+
+```{r}
+test.lm.model <- lm(opening_weekend_revenue ~ opening_weekend_theaters, data = movie_summary_gen)
+summary(test.lm.model)
+print(paste( "RMSE; ",  sqrt(mean(( ( exp(test.lm.model$fitted.values) * mean(exp(test.lm.model$residuals)) ) - movie_summary_gen$opening_weekend_revenue)**2))))
+```
+
+
+
+```{r}
+plot(test.lm.model$residuals)
+```
+
+```{r}
+movie_summary_gen$release_year <- as.numeric(movie_summary_gen$release_year)
+movie_summary_gen$season <- factor(movie_summary_gen$season, levels = unique(movie_summary_gen$season))
+movie_summary_gen$genre <- factor(movie_summary_gen$genre, levels = unique(movie_summary_gen$genre))
+head(movie_summary_gen)
+```
+
+
+```{r}
+#divide into train and test set.seed()
+train <- movie_summary_gen[movie_summary_gen$release_year < 2019, ]
+test <- movie_summary_gen[movie_summary_gen$release_year == 2019, ]
+```
+
+```{r}
+table(test$release_year)
+table(train$release_year)
+```
+
+
+```{r}
+test.lm.model <- lm(log_revenue ~ + opening_weekend_theaters + sequel + running_time + season + genre + creative_type + source + production_method, data = train)
+summary(test.lm.model)
+print(paste( "RMSE; ",  sqrt(mean(( ( exp(test.lm.model$fitted.values) * mean(exp(test.lm.model$residuals)) ) - train$opening_weekend_revenue)**2))))
+```
+
+
+## Construction a new datapoint
+
+
+
+```{r}
+# Onward
+sequel <- '0'
+running_time <- 114
+season <- '0'
+opening_weekend_theaters <- 4529
+genre <- 'Adventure' 
+creative_type <- 'Dramatization'
+source <- 'Original Screenplay'  
+production_method <- 'Digital Animation'
+#log_revenue <- log(revenue)
+newdf <- data.frame(revenue, sequel, running_time, season, opening_weekend_theaters, genre, creative_type, source, production_method)
+
+newdf
+```
+
+```{r}
+yhat <- predict.lm(test.lm.model, newdf)
+yhat
+```
+
+```{r}
+head(test)
+```
+
+
+```{r}
+exp(yhat)
+```
+
+
+
+```{r}
+# Theway Back
+sequel <- '0'
+running_time <- 108
+season <- '0'
+opening_weekend_theaters <- 3014
+genre <- 'Drama' 
+creative_type <- 'Contemporary Fiction'
+source <- 'Original Screenplay'  
+production_method <- 'Live Action'
+#log_revenue <- log(revenue)
+newdf1 <- data.frame(revenue, sequel, running_time, season, opening_weekend_theaters, genre, creative_type, source, production_method)
+
+newdf1
+```
+
+```{r}
+predict.lm(test.lm.model, newdf1)
+exp(predict.lm(test.lm.model, newdf1))
+```
+
+
+```{r}
+
+# Onward
+sequel <- '0'
+running_time <- 119
+season <- '0'
+opening_weekend_theaters <- 2286
+genre <- 'Drama' 
+creative_type <- 'Historical Fiction'
+source <- 'Based on Fiction Book/Short Story'  
+production_method <- 'Live Action'
+#log_revenue <- log(revenue)
+newdf2 <- data.frame(revenue, sequel, running_time, season, opening_weekend_theaters, genre, creative_type, source, production_method)
+
+newdf2
+
+```
+
+```{r}
+predict.lm(test.lm.model, newdf2)
+exp(predict.lm(test.lm.model, newdf2))
+```
+
+### Trying GBM
+
+```{r}
+# model
+library(gbm)
+set.seed(123)
+M <- gbm::gbm( opening_weekend_revenue ~ opening_weekend_theaters, 
+             # the formula for the model (recall that the period means, "all 
+             # variables in the data set")
+             data = train, 
+             # data set
+             #distribution = 'tdist',
+             # i'm using tdist since it can accomodate heavire tails
+             shrinkage = 0.01, 
+             # a shrinkage parameter applied to each tree in the expansion. 
+             # Also known as the learning rate or step-size reduction; 0.001 
+             # to 0.1 usually work, but a smaller learning rate typically 
+             # requires more trees.
+             interaction.depth = 3, 
+             # Integer specifying the maximum depth of each tree (i.e., the 
+             # highest level of variable interactions allowed). A value of 1 
+             # implies an additive model, a value of 2 implies a model with up
+             #  to 2-way interactions
+             n.minobsinnode = 5,
+             # Integer specifying the minimum number of observations in the 
+             # terminal nodes of the trees. Note that this is the actual number 
+             # of observations, not the total weight.
+             n.trees = 5000 
+             # Integer specifying the total number of trees to fit. This is 
+             # equivalent to the number of iterations and the number of basis 
+             # functions in the additive expansion.
+             )
+```
+
+
+```{r}
+perf_gbm_ = gbm.perf(M, method = "OOB")
+```
+
+```{r}
+movie_prediction_ <- stats::predict(
+                           # the model from above
+                          object = M, 
+                          # the testing data
+                          newdata = newdf,
+                          # this is the number we calculated above
+                          n.trees = perf_gbm_)
+rmse_fit_ <- Metrics::rmse(actual = test$opening_weekend_revenue, 
+                           predicted = movie_prediction_)
+print(rmse_fit_)
+```
+
+```{r}
+movie_prediction_
+```
+
+
+
+```{r}
+movie_prediction_ <- stats::predict(
+                           # the model from above
+                          object = M, 
+                          # the testing data
+                          newdata = newdf1,
+                          # this is the number we calculated above
+                          n.trees = perf_gbm_)
+rmse_fit_ <- Metrics::rmse(actual = test$opening_weekend_revenue, 
+                           predicted = movie_prediction_)
+print(rmse_fit_)
+```
+
+
+```{r}
+movie_prediction_ <- stats::predict(
+                           # the model from above
+                          object = M, 
+                          # the testing data
+                          newdata = newdf2,
+                          # this is the number we calculated above
+                          n.trees = perf_gbm_)
+rmse_fit_ <- Metrics::rmse(actual = test$opening_weekend_revenue, 
+                           predicted = movie_prediction_)
+print(rmse_fit_)
+```
+
+
+
+
+
+
+
+### look at the inflation data
+
+```{r}
+inflation_data <- read.csv("data/cpiai_csv.csv")
+```
+
+```{r}
+# change to date variable
+inflation_data$Date <- as.Date(inflation_data$Date)
+inflation_data$year <- (format(inflation_data$Date, '%Y'))
+inflation_data$month <- ((format(inflation_data$Date, '%m')))
+View(inflation_data)
+```
+
+
+### Munging
+
+
+```{r}
+# convert runtime to integer
+movie_summary$running_time <- as.integer(movie_summary$running_time)
+
+# convert inflation adjusted box office from factors to double
+movie_summary$inflation_adjusted_domestic_box_office <- as.double(movie_summary$inflation_adjusted_domestic_box_office)
+
+# get the release year and month
+movie_summary$release_date<- as.Date(movie_summary$release_date)
+movie_summary$release_year <- (format(movie_summary$release_date, '%Y'))
+movie_summary$release_month <- ((format(movie_summary$release_date, '%m')))
+
+## drop unnecessary columns
+
+cols.drop <- c("display_name", "od_name", "theatrical_engagements ")
+```
+
+
+```{r}
+movie_summary$naive_inflation_factor <- movie_summary$inflation_adjusted_domestic_box_office/movie_summary$domestic_box_office
+head(movie_summary)
+```
+
+
+
+```{r}
+# look at the summary statistics
+summary(movie_summary)
+```
+
+
+```{r}
+# look at the summary of movies without ratings
+rated_ids <- movie_ratings$movie_odid
+non_rated <- movie_summary_net[!(movie_summary_net$movie_odid %in% rated_ids),]
+dim(non_rated)
+```
+
+```{r}
+head(movie_ratings)
+```
+
+
+```{r}
+head(movie_summary_net)
+```
+
+
+```{r}
+head(movie_summary)
+```
+
+
+```{r}
+summary(non_rated)
+```
+
+```{r}
+dim(non_rated)
+sum(non_rated$opening_weekend_revenue == 0)
+```
+
+```{r}
+summary(movie_summary)
+```
+
+
+
+### Subset data 
+
+```{r}
+movie_summary_median <- movie_summary[movie_summary$opening_weekend_revenue >= median(movie_summary$opening_weekend_revenue), ]
+#head(movie_summary_median)
+summary(movie_summary_median) # this does not make any difference
+```
+
+
+######~~~~~~~~~~~~~~~~~~~~~~~~~~
+###~~~~~~~~~~~~~~~~~~~~
+###  Working with the median data
+###~~~~~~~~~~~~~~~~~~~~
+######~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+### Build the model
+
+```{r}
+movie_summary_median1 <- movie_summary_median[movie_summary_median$production_budget!=0, ]
+movie_summary_median1 <- movie_summary_median1[movie_summary_median1$opening_weekend_revenue!=0, ]
+# add the log scales
+movie_summary_median1$log_rev <- log(movie_summary_median1$opening_weekend_revenue)
+movie_summary_median1$log_prod <- log(movie_summary_median1$production_budget)
+train.data.m1 <- movie_summary_median1[movie_summary_median1$release_year != "2019", ]
+dim(train.data.m1)
+test.data.m1 <- movie_summary_median1[movie_summary_median1$release_year == "2019", ]
+dim(test.data.m1)
+```
+
+
+
+```{r}
+names(train.data.m)
+```
+
+
+## Initial model
+
+```{r}
+library(olsrr)
+lm.model.median1 <- lm(log(opening_weekend_revenue) ~ log(production_budget) + running_time +  opening_weekend_theaters + release_month  + source + creative_type + production_method + genre + sequel + rating, data  =  train.data.m1)
+#k <- ols_step_all_possible(lm.model.median1)
+summary(lm.model.median1)
+```
+
+```{r}
+#stargazer(lm.model.median1)
+```
+
+
+
+### performing best subset selection
+
+```{r}
+k.best.subset <- ols_step_best_subset(lm.model.median1)
+```
+
+```{r}
+library(stargazer)
+stargazer(k.best.subset)
+```
+
+
+```{r}
+k.best.subset
+```
+
+
+
+
+```{r}
+k[k$adjr==max(k$adjr), ]
+```
+
+
+```{r}
+print(paste("Train MSE: ", sqrt(mean(lm.model.median1$residuals)^2)))
+#predictions <- predict(lm.model.median1,test.data1.m)
+#print(paste("Test MSE: ", sqrt(mean((test.data.m1$opening_weekend_revenue - exp(predictions)) ^ 2))))
+```
+
+
+### Group months into seasons, and ratings into whether it has been rated or not
+
+```{r}
+movie_summary_median2 <- movie_summary_median
+movie_summary_median2$season<- rep("other", nrow(movie_summary_median2))
+movie_summary_median2$is_rated<- rep("yes", nrow(movie_summary_median2))
+movie_summary_median2[movie_summary_median2$rating == "Not Rated", ][, "is_rated"] <- "no"
+movie_summary_median2[movie_summary_median2$release_month == "05", ][, "season"] <- "summer"
+movie_summary_median2[movie_summary_median2$release_month == "06", ][, "season"] <- "summer"
+movie_summary_median2[movie_summary_median2$release_month == "07", ][, "season"] <- "summer"
+movie_summary_median2[movie_summary_median2$release_month == "12", ][, "season"] <- "yuletide"
+head(movie_summary_median2)
+```
+
+```{r}
+train.data.m2 <- movie_summary_median2[movie_summary_median2$release_year != "2019", ]
+dim(train.data.m2)
+test.data.m2 <- movie_summary_median2[movie_summary_median2$release_year == "2019", ]
+dim(test.data.m2)
+```
+
+
+```{r}
+lm.model.median2 <- lm(opening_weekend_revenue ~ production_budget + season + genre + source + running_time + creative_type + production_method + opening_weekend_theaters + sequel + is_rated, data  =  train.data.m2)
+summary(lm.model.median2)
+```
+
+
+```{r}
+print(paste("Train MSE: ", sqrt(mean(lm.model.median2$residuals)^2)))
+predictions1 <- predict(lm.model.median2,test.data.m2)
+print(paste("Test MSE: ", sqrt(mean((test.data.m2$opening_weekend_revenue - predictions1) ^ 2))))
+```
+
+```{r}
+  
+```
+

@@ -1,0 +1,543 @@
+---
+title: "Gradient Boosting"
+author: "Sixtus Dakurah"
+date: "3/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+```
+
+
+```{r}
+library(Metrics)
+```
+
+
+```{r}
+# expose the modules here
+packages.Self <- modules::use("libs.R")
+graphics.Self <- modules::use("graphics.R")
+munging.Self <- modules::use("mungin.R")
+network.Self <- modules::use("network.R")
+```
+
+```{r}
+# load libraries
+packages.Self$getPackages()
+```
+
+
+```{r message=FALSE, warning=FALSE}
+movie_summary_net <- network.Self$getDataFile("https://sixtusdakurah.com/projects/box-office/movie_summary.csv")
+movie_ratings <- network.Self$getDataFile("https://sixtusdakurah.com/projects/box-office/movie_ratings.csv")
+#weekend_boxoffice <- network.Self$getDataFile("https://sixtusdakurah.com/projects/box-office/weekend_boxoffice.csv")
+```
+
+
+```{r}
+dim(movie_summary_net)
+dim(movie_ratings)
+```
+
+
+```{r}
+#movie_summary_net$international_box_office <- as.numeric(movie_summary_net$international_box_office)
+movie_summary_net$inflation_adjusted_domestic_box_office <- as.numeric(levels(movie_summary_net$inflation_adjusted_domestic_box_office))[movie_summary_net$inflation_adjusted_domestic_box_office]
+head(movie_summary_net)
+```
+
+```{r}
+dim(movie_summary_net[is.na(movie_summary_net$inflation_adjusted_domestic_box_office), ])
+```
+
+
+```{r}
+movie_merged <- merge(movie_summary_net, movie_ratings, by = "movie_odid")
+```
+
+
+```{r}
+glimpse(movie_merged)
+```
+
+
+
+```{r}
+head(movie_merged)
+```
+
+
+## Repeat of EDA - Continuous Features
+
+# remove zero opening weekedn revenue
+
+```{r}
+movie_merged <- movie_merged[movie_merged$opening_weekend_revenue>0, ]
+```
+
+
+## add the inflation factor and adjust the domestic box office ... just using the inflation factor doesn't seem right. 
+## The opening weekend revenue is just for a week, the domestic boxoffice is for a whole year
+
+```{r}
+movie_merged$inflation_factor <- movie_merged$inflation_adjusted_domestic_box_office/movie_merged$domestic_box_office
+# now adjust the opening weekend revenue for inflation
+movie_merged$opening_weekend_revenue <- movie_merged$opening_weekend_revenue*movie_merged$inflation_factor
+
+head(movie_merged)
+```
+
+
+```{r}
+# add the reciprocal transform
+#movie_merged$rev_recp <- 1/(movie_merged$opening_weekend_revenue)
+ggplot(movie_merged[movie_merged$opening_weekend_revenue> median(movie_merged$opening_weekend_revenue), ], aes(log10(opening_weekend_revenue))) + geom_histogram() # + xlab("Production Budget") + ylab("Opening Weekend Revenue")
+```
+
+
+
+```{r}
+ggplot(movie_merged[log10(movie_merged$opening_weekend_revenue)>6.25, ], aes(log10(opening_weekend_revenue))) + geom_histogram() # + xlab("Production Budget") + ylab("Opening Weekend Revenue")
+```
+
+## put that to a dummy dataset
+
+```{r}
+upper.data.all <- movie_merged[movie_merged$opening_weekend_revenue > median(movie_merged$opening_weekend_revenue)&&log10(movie_merged$opening_weekend_revenue)>6.25, ]
+ggplot(movie_merged[movie_merged$opening_weekend_revenue > median(movie_merged$opening_weekend_revenue)&&log10(movie_merged$opening_weekend_revenue)>6.25, ], aes(log10(opening_weekend_revenue))) + geom_histogram() 
+```
+
+
+
+```{r}
+dim(movie_merged[movie_merged$opening_weekend_revenue==0, ])
+```
+
+```{r}
+dim(movie_merged[is.na(movie_merged$inflation_adjusted_domestic_box_office), ])
+```
+
+
+
+```{r}
+#ggplot(movie_merged, aes(x = production_budget, y=opening_weekend_revenue)) + geom_point() + xlab("Production Budget") + ylab("Opening Weekend Revenue")
+ggplot(movie_merged, aes(x = production_budget, y=opening_weekend_revenue)) + geom_point() + xlab("Production Budget") + ylab("Opening Weekend Revenue")
+```
+
+
+## convert run time to continuous
+
+```{r}
+movie_merged$running_time <- as.numeric(movie_merged$running_time)
+```
+
+```{r}
+ggplot(movie_merged, aes(x = running_time, y=opening_weekend_revenue)) + geom_point() + xlab("Running Time") + ylab("Opening Weekend Revenue")
+```
+
+## there is a sharp divide in the runtime for various movies. but they does not appear to be a strong association between the two
+
+
+
+##  A look at other variables
+
+```{r}
+movie_merged$distributor <- fct_explicit_na(movie_merged$distributor, na_level = "Unknown")
+
+movie_merged %>%
+   group_by(distributor) %>%
+   summarise(movie_count = n()) %>%
+   arrange(desc(movie_count)) %>%
+   filter(!is.na(distributor))
+```
+
+
+## Craete a top distributor category for distributors with categories above 2999
+
+```{r}
+movie_merged$top_distributor[movie_merged$distributor=='Warner Bros.'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='Sony Pictures'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='Lionsgate'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='IFC Films'] <- 'top distributor'
+
+movie_merged$top_distributor[movie_merged$distributor=='Sony Pictures Classics'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='Walt Disney'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='20th Century Fox'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='Paramount Pictures'] <- 'top distributor'
+movie_merged$top_distributor[movie_merged$distributor=='Universal'] <- 'top distributor'
+#movie_merged$top_distributor[movie_merged$distributor=='Miramax'] <- 'medium distributor'
+#movie_merged$top_distributor[movie_merged$distributor=='Magnolia Pictures'] <- 'medium distributor'
+
+
+# lump the null category to the rest
+movie_merged$top_distributor[is.na(movie_merged$top_distributor)] <- 'other distributor'
+
+```
+
+## look at it's effect on revenue
+
+```{r}
+ggplot(movie_merged, aes(y =opening_weekend_revenue, x=top_distributor)) + geom_boxplot() + xlab("Top Distributor") + ylab("Opening Weekend Revenue")
+```
+
+
+```{r}
+ggplot(movie_merged, aes(y = production_budget , x=top_distributor)) + geom_boxplot() + xlab("Top Distributor") + ylab("Production Budget")
+```
+
+
+## use this to create the production company size
+
+```{r}
+movie_merged$production_comp_size[movie_merged$top_distributor=='top distributor'] <- 'big producer'
+# lump other category to the rest
+movie_merged$production_comp_size[is.na(movie_merged$production_comp_size)]  <- 'small producer'
+```
+
+
+```{r}
+ggplot(movie_merged, aes(y =opening_weekend_revenue , x=production_comp_size)) + geom_boxplot() + xlab("Production Company Size") + ylab("Opening Weekend Revenue")
+```
+
+
+
+```{r}
+ggplot(movie_merged, aes(y =opening_weekend_revenue , x=production_comp_size)) + geom_bar(stat = "summary", fun.y="mean") + xlab("Production Company Size") + ylab("Opening Weekend Revenue")
+```
+
+
+```{r}
+movie_merged$release_date_char <- as.character(movie_merged$release_date)
+movie_merged$release_date_mod <- parse_date_time(as.character(movie_merged$release_date_char), "ymd")
+
+
+movie_merged$year_released <- ymd(movie_merged$release_date_mod) %>% 
+   lubridate::year()  # Grab year.
+
+movie_merged$quarter_released <- ymd(movie_merged$release_date_mod) %>%
+   lubridate::quarter()  # Grab quarter.
+
+movie_merged$month_released <- ymd(movie_merged$release_date_mod) %>% 
+   lubridate::month(label = TRUE, abbr = FALSE)  # Grab month.
+
+movie_merged$week_released <- ymd(movie_merged$release_date_mod) %>%
+   lubridate::week()  # Grab week.
+
+movie_merged$weekday_released <- ymd(movie_merged$release_date_mod) %>%
+   lubridate::wday(label = TRUE, abbr = FALSE)  # Grab weekday.
+
+```
+
+
+```{r}
+head(movie_merged)
+```
+
+
+## look at the median revenue by quarter
+
+```{r}
+ggplot(movie_merged, aes(y =opening_weekend_revenue , x=quarter_released)) + geom_bar(stat = "summary", fun.y="median") + xlab("Release Quater") + ylab("Opening Weekend Revenue")
+```
+
+
+
+## look at the median revenue by quarter
+
+```{r}
+ggplot(movie_merged, aes(y =opening_weekend_revenue , x=month_released)) + geom_bar(stat = "summary", fun.y="median") + xlab("Release Month") + ylab("Opening Weekend Revenue") + coord_flip()
+```
+
+
+
+## look at the median revenue by genre
+
+```{r}
+movie_merged$genre <- fct_explicit_na(movie_merged$genre, na_level = "Unknown")
+ggplot(movie_merged, aes(x=genre)) + geom_bar(position = "dodge") + xlab("Genre") + ylab("Count") + coord_flip()
+```
+
+```{r}
+movie_merged$genre <- fct_explicit_na(movie_merged$genre, na_level = "Unknown")
+ggplot(movie_merged, aes(x=genre, y=opening_weekend_revenue)) + geom_bar(position = "dodge", stat="summary", fun.y="median") + xlab("Genre") + ylab("Median Opening Weekend Revenue") + coord_flip()
+```
+
+## create a new category to take care of that
+
+```{r}
+movie_merged$top_grossing_genre[movie_merged$genre=='Adventure'] <- 'top genre'
+movie_merged$top_grossing_genre[movie_merged$genre=='Action'] <- 'top genre'
+movie_merged$top_grossing_genre[movie_merged$genre=='Horror'] <- 'medium genre'
+#movie_merged$top_grossing_genre[movie_merged$genre=='Thriller/Suspense'] <- 'medium genre'
+#movie_merged$top_grossing_genre[movie_merged$genre=='Romantic comedy'] <- 'medium genre'
+
+# lump the null category to the rest
+movie_merged$top_grossing_genre[is.na(movie_merged$top_grossing_genre)] <- 'other genre'
+```
+
+```{r}
+ggplot(movie_merged, aes(x=top_grossing_genre, y=opening_weekend_revenue)) + geom_bar(position = "dodge", stat="summary", fun.y="median") + xlab("Genre") + ylab("Median Opening Weekend Revenue") + coord_flip()
+```
+
+
+## A loot at rating
+
+```{r}
+movie_merged$rating <- fct_explicit_na(movie_merged$rating, na_level = "Unknown")
+ggplot(movie_merged, aes(x=rating)) + geom_bar(position = "dodge") + xlab("Rating") + ylab("Count") + coord_flip()
+```
+
+
+```{r}
+ggplot(movie_merged, aes(x=rating, y=opening_weekend_revenue)) + geom_bar(position = "dodge", stat="summary", fun.y="median") + xlab("Rating") + ylab("Median Opening Weekend Revenue") + coord_flip()
+```
+
+
+## create a new variable for key words count in title and title length
+
+```{r}
+movie_merged$title_length <- str_length(movie_merged$display_name.x)
+movie_merged$description_length <- str_length(movie_merged$reason)
+```
+
+
+```{r}
+ggplot(movie_merged, aes(x=title_length, y=opening_weekend_revenue)) + geom_point() + xlab("Title Length") + ylab("Opening Weekend Revenue")
+```
+
+```{r}
+ggplot(movie_merged, aes(x=description_length, y=opening_weekend_revenue)) + geom_point() + xlab("Description Length") + ylab("Opening Weekend Revenue")
+
+```
+
+
+```{r}
+movie_merged$source<- fct_explicit_na(movie_merged$source, na_level = "Unknown")
+movie_merged$creative_type<- fct_explicit_na(movie_merged$creative_type, na_level = "Unknown")
+movie_merged$production_method<- fct_explicit_na(movie_merged$production_method, na_level = "Unknown")
+```
+
+
+```{r}
+merged_subset <- subset(movie_merged,
+                        select = c(
+                          opening_weekend_revenue, 
+                          running_time, 
+                          sequel, 
+                          creative_type, 
+                          source, 
+                          genre, 
+                          production_method,
+                          production_budget, 
+                          rating, 
+                          top_distributor, 
+                          production_comp_size, 
+                          quarter_released, 
+                          month_released, 
+                          year_released,
+                          top_grossing_genre, 
+                          title_length, 
+                          description_length))
+```
+
+
+```{r}
+aggr(merged_subset, sortVars = TRUE, prop = FALSE, cex.axis = .35, 
+     numbers = TRUE, col = c('grey99','red'))
+```
+
+## impute categorical missing with the mean
+
+```{r}
+merged_subset$description_length[is.na(merged_subset$description_length)] <- mean(merged_subset$description_length, na.rm = TRUE)
+```
+
+
+```{r}
+aggr(merged_subset, sortVars = TRUE, prop = FALSE, cex.axis = .35, 
+     numbers = TRUE, col = c('grey99','red'))
+```
+
+
+## log transfrom skewed data
+
+```{r}
+merged_subset <- mutate(merged_subset,
+                           production_budget = log10(production_budget + 1),
+                           #opening_weekend_revenue = log10(opening_weekend_revenue),
+                        #opening_weekend_revenue = rev_recp,
+                        running_time = log10(running_time + 1),
+                        title_length  = log10(title_length + 1),
+                        description_length = log10(description_length + 1)
+                        
+                        )
+```
+
+```{r}
+head(merged_subset)
+```
+
+## create a linear model to predict for 0 budget
+
+```{r}
+# Create linear model to predict budget. 
+lm_budget <- lm(production_budget ~ running_time + sequel + production_method +
+                   top_grossing_genre + production_comp_size + quarter_released , 
+                data = merged_subset[merged_subset$production_budget!=0, ])
+summary(lm_budget)
+```
+
+```{r}
+# Predict all 0 in budget with lm_budget.
+merged_subset$production_budget[merged_subset$production_budget==0] <- predict(lm_budget)
+```
+
+```{r}
+merged_subset$budget_year_ratio <- merged_subset$production_budget/merged_subset$year_released
+```
+
+```{r}
+merged_subset <-merged_subset %>% mutate_if(is.character, as.factor)
+merged_subset$month_released <- factor(merged_subset$month_released, ordered = FALSE)
+merged_subset$quarter_released <- factor(merged_subset$quarter_released)
+```
+
+
+```{r}
+summary(merged_subset$opening_weekend_revenue)
+```
+
+```{r}
+summary( (merged_subset[merged_subset$opening_weekend_revenue >= 8000 & merged_subset$opening_weekend_revenue<40000, ])$opening_weekend_revenue)
+```
+
+
+```{r}
+par(mfrow=c(1,3))
+ggplot(merged_subset, aes(opening_weekend_revenue)) + geom_histogram()
+
+ggplot(merged_subset[merged_subset$opening_weekend_revenue < 8000, ], aes(opening_weekend_revenue)) + geom_histogram()
+
+ggplot(merged_subset[merged_subset$opening_weekend_revenue >= 8000 & merged_subset$opening_weekend_revenue<11552, ], aes(opening_weekend_revenue)) + geom_histogram() 
+
+ggplot(merged_subset[merged_subset$opening_weekend_revenue >= 11552 & merged_subset$opening_weekend_revenue<16928, ], aes(opening_weekend_revenue)) + geom_histogram() 
+
+dim(merged_subset[merged_subset$opening_weekend_revenue < 6.25, ])
+dim(merged_subset[merged_subset$opening_weekend_revenue >= 6.25 && merged_subset$opening_weekend_revenue<8, ])
+```
+
+```{r}
+summary(merged_subset[merged_subset$opening_weekend_revenue < 6.25, ])
+summary(merged_subset[merged_subset$opening_weekend_revenue >= 6.25 & merged_subset$opening_weekend_revenue >= 6.25, ])
+```
+
+
+
+
+```{r}
+merged_subset2 <- merged_subset[merged_subset$opening_weekend_revenue >= 6.25, ]
+merged_subset3 <- merged_subset[merged_subset$opening_weekend_revenue < 6.25, ]
+```
+
+
+## train test split
+
+```{r}
+ggplot(merged_subset2, aes((opening_weekend_revenue))) + geom_histogram()
+#merged_subset <- merged_subset[merged_subset$opening_weekend_revenue<=6.25, ]
+```
+
+
+
+```{r}
+train <- merged_subset[merged_subset$year_released!='2019', ]
+dim(train)
+test <- merged_subset[merged_subset$year_released=='2019', ]
+dim(test)
+```
+
+```{r}
+head(train)
+```
+
+
+```{r}
+# model
+library(gbm)
+set.seed(123)
+M <- gbm::gbm( opening_weekend_revenue ~ ., 
+             # the formula for the model (recall that the period means, "all 
+             # variables in the data set")
+             data = train, 
+             # data set
+             #distribution = 'tdist',
+             # i'm using tdist since it can accomodate heavire tails
+             shrinkage = 0.01, 
+             # a shrinkage parameter applied to each tree in the expansion. 
+             # Also known as the learning rate or step-size reduction; 0.001 
+             # to 0.1 usually work, but a smaller learning rate typically 
+             # requires more trees.
+             interaction.depth = 3, 
+             # Integer specifying the maximum depth of each tree (i.e., the 
+             # highest level of variable interactions allowed). A value of 1 
+             # implies an additive model, a value of 2 implies a model with up
+             #  to 2-way interactions
+             n.minobsinnode = 5,
+             # Integer specifying the minimum number of observations in the 
+             # terminal nodes of the trees. Note that this is the actual number 
+             # of observations, not the total weight.
+             n.trees = 50000 
+             # Integer specifying the total number of trees to fit. This is 
+             # equivalent to the number of iterations and the number of basis 
+             # functions in the additive expansion.
+             )
+```
+
+
+```{r}
+perf_gbm_ = gbm.perf(M, method = "OOB")
+```
+
+```{r}
+movie_prediction_ <- stats::predict(
+                           # the model from above
+                          object = M, 
+                          # the testing data
+                          newdata = test,
+                          # this is the number we calculated above
+                          n.trees = perf_gbm_)
+rmse_fit_ <- Metrics::rmse(actual = test$opening_weekend_revenue, 
+                           predicted = movie_prediction_)
+print(rmse_fit_)
+```
+
+
+```{r}
+prediction <- predict(rf_model, test)
+```
+
+
+```{r}
+#id <- (movie_merged[movie_merged$year_released=='2019', ])$movie_odid
+solution <- data.frame(revenue_pred_ls = prediction)
+solution$revenue_ls <- test$opening_weekend_revenue
+#solution <- as_tibble(solution) %>% mutate(revenue_pred = 10^revenue_pred_ls)
+#solution <- as_tibble(solution) %>% mutate(revenue = 10^revenue_ls)
+```
+
+```{r}
+(solution)
+```
+
+```{r}
+sqrt(mean((solution$revenue_pred_ls -solution$revenue_ls)**2))
+```
+
+
+
+
+
+
