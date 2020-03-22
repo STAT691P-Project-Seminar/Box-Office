@@ -12,7 +12,7 @@ rm(list=ls())
 # mandatory install
 library(modules)
 # set wkdir
-setwd("/Users/sixtusdakurah/Documents/GRAD SCHOOL/SPRING 2020/Project Seminar/Box-Office")
+setwd("")
 library(stargazer)
 ```
 
